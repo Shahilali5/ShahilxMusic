@@ -1,42 +1,99 @@
 import asyncio
-import os
-import time
-import glob
-import random
-import browser_cookie3
-from pyrogram import filters
-from yt_dlp import YoutubeDL
+
+from pyrogram.enums import ChatType
+
+import config
 from ChampuMusic import app
-from ChampuMusic.misc import SUDOERS
+from ChampuMusic.core.call import Champu
+from ChampuMusic.core.call import _st_ as clean
+from ChampuMusic.utils.database import (
+    get_active_chats,
+    get_assistant,
+    get_client,
+    is_active_chat,
+    is_autoend,
+)
 
-def extract_cookies():
-    try:
-        cj = browser_cookie3.chrome(domain_name="youtube.com")
-        cookie_file = "cookies/cookies.txt"
-        with open(cookie_file, "w") as f:
-            for cookie in cj:
-                f.write(f"{cookie.name}\t{cookie.value}\n")
-        return True
-    except Exception as e:
-        return str(e)
 
-def play_video():
-    video_url = "https://www.youtube.com/watch?v=LLF3GMfNEYU"
-    os.system(f"start {video_url}")
-    time.sleep(random.randint(10, 15))
+async def auto_leave():
+    if config.AUTO_LEAVING_ASSISTANT == str(True):
+        while not await asyncio.sleep(config.AUTO_LEAVE_ASSISTANT_TIME):
+            from ChampuMusic.core.userbot import assistants
 
-@app.on_message(filters.command("cookies") & SUDOERS)
-async def generate_cookies(client, message):
-    status_msg = await message.reply_text("🔄 Generating cookies, please wait...")
-    
-    try:
-        play_video()
-        extract_status = extract_cookies()
-        
-        if extract_status is True:
-            await status_msg.edit_text("✅ Successfully extracted and saved cookies.")
-            await client.send_message("log_group", "✅ Successfully generated new cookies!")
-        else:
-            await status_msg.edit_text(f"❌ Failed to extract cookies: {extract_status}")
-    except Exception as e:
-        await status_msg.edit_text(f"❌ Error: {str(e)}")
+            for num in assistants:
+                client = await get_client(num)
+                left = 0
+                try:
+                    async for i in client.get_dialogs():
+                        chat_type = i.chat.type
+                        if chat_type in [
+                            ChatType.SUPERGROUP,
+                            ChatType.GROUP,
+                            ChatType.CHANNEL,
+                        ]:
+                            chat_id = i.chat.id
+                            if chat_id not in [
+                                config.LOGGER_ID,
+                                -1001961655253,
+                                -1001423108989,
+                            ]:
+                                if left == 20:
+                                    continue
+                                if not await is_active_chat(chat_id):
+                                    try:
+                                        await client.leave_chat(chat_id)
+                                        left += 1
+                                    except:
+                                        continue
+                except:
+                    pass
+
+
+asyncio.create_task(auto_leave())
+
+
+async def auto_end():
+    while not await asyncio.sleep(30):
+        if not await is_autoend():
+            continue
+
+        served_chats = await get_active_chats()
+
+        for chat_id in served_chats:
+            try:
+                if not await is_active_chat(chat_id):
+                    await clean(chat_id)
+                    continue
+
+                userbot = await get_assistant(chat_id)
+                call_participants_id = [
+                    member.chat.id async for member in userbot.get_call_members(chat_id)
+                ]
+
+                if len(call_participants_id) <= 1:
+                    ok = await app.send_message(
+                        chat_id,
+                        "» Nᴏ ᴏɴᴇ ɪs ʟɪsᴛᴇɴɪɴɢ ᴛᴏ sᴏɴɢ ɪɴ ᴛʜᴇ ᴠᴏɪᴄᴇ ᴄʜᴀᴛ.\n"
+                        "ᴘʟᴇᴀsᴇ ᴊᴏɪɴ ᴛʜᴇ ᴠᴏɪᴄᴇ ᴄʜᴀᴛ ᴏᴛʜᴇʀᴡɪsᴇ ʙᴏᴛ ᴡɪʟʟ ᴇɴᴅ sᴏɴɢ ɪɴ 15 sᴇᴄᴏɴᴅs.",
+                    )
+                    await asyncio.sleep(15)
+
+                    call_participants_id = [
+                        member.chat.id
+                        async for member in userbot.get_call_members(chat_id)
+                    ]
+
+                    if len(call_participants_id) <= 1:
+                        await ok.delete()
+                        await Champu.stop_stream(chat_id)
+                        await app.send_message(
+                            chat_id,
+                            "» Nᴏ ᴏɴᴇ ᴊᴏɪɴᴇᴅ ᴛʜᴇ ᴠᴏɪᴄᴇ ᴄʜᴀᴛ, sᴏ ᴛʜᴇ sᴏɴɢ ɪs ᴇɴᴅɪɴɢ ᴅᴜᴇ ᴛᴏ ɪɴᴀᴄᴛɪᴠɪᴛʏ.",
+                        )
+                        await clean(chat_id)
+            except:
+                continue
+
+
+# Start the auto_end task
+asyncio.create_task(auto_end())
